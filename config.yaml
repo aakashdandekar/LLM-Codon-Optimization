@@ -3,6 +3,7 @@
 model:
   name: "unsloth/Qwen2.5-Coder-1.5B-Instruct"
   output_dir: "models/qwen-codon-optimization-model"
+  organism: null  # Specific host organism (e.g. "Escherichia coli"). If bacteria, included in model name.
   max_seq_length: 2048
   load_in_4bit: true
 

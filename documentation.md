@@ -139,12 +139,17 @@ To train on consumer hardware with 6GB VRAM (e.g., NVIDIA GeForce RTX 4050), the
 - **Gradient Checkpointing:** Enabled (`use_gradient_checkpointing="unsloth"`).
 - **Maximum Sequence Length:** 2048 tokens.
 
-### 3.3 Dynamic Output Directory Resolution
-The pipeline normalizes model names and maps them to clean directory paths:
-- Models containing `"qwen"` (e.g., `unsloth/Qwen2.5-Coder-1.5B-Instruct`, `qwen3.5-coder`) $\rightarrow$ `models/qwen-codon-optimization-model`
-- Models containing `"gpt2"` (e.g., `gpt2-large`) $\rightarrow$ `models/gpt2-codon-optimization-model`
-- Models containing `"llama"` (e.g., `meta-llama/Llama-3.2-1B-Instruct`) $\rightarrow$ `models/llama-codon-optimization-model`
-- Models containing `"mistral"` $\rightarrow$ `models/mistral-codon-optimization-model`
+### 3.3 Dynamic Output Directory and Bacterial Model Resolution
+The pipeline normalizes base model names and maps them to clean directory paths. If the model is specific to a bacterium (specified via `--organism`, `config.yaml`, or detected from a single-species bacterial dataset), the standardized bacterial identifier (e.g. `ecoli`) is automatically integrated into the model name:
+- Generic models:
+  - Models containing `"qwen"` (e.g., `unsloth/Qwen2.5-Coder-1.5B-Instruct`) $\rightarrow$ `models/qwen-codon-optimization-model`
+  - Models containing `"gpt2"` (e.g., `gpt2-large`) $\rightarrow$ `models/gpt2-codon-optimization-model`
+  - Models containing `"llama"` $\rightarrow$ `models/llama-codon-optimization-model`
+  - Models containing `"mistral"` $\rightarrow$ `models/mistral-codon-optimization-model`
+- Bacteria-specific models:
+  - Qwen + *Escherichia coli* $\rightarrow$ `models/qwen-ecoli-codon-optimization-model`
+  - Llama + *Bacillus subtilis* $\rightarrow$ `models/llama-bacillus-subtilis-codon-optimization-model`
+- Non-bacterial hosts (e.g. *Homo sapiens*, *Saccharomyces cerevisiae*, *Arabidopsis thaliana*) retain generic model naming.
 
 ### 3.4 Decoupled Lifecycle Operations
 - `--collect`: Fetches and validates sequence pairs across all available organisms, saving to `data/dataset.jsonl`.

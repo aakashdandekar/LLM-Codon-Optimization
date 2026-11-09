@@ -1,5 +1,6 @@
 import math
-from typing import Dict, List, Tuple
+import re
+from typing import Dict, List, Tuple, Optional
 
 TRANSLATION_TABLE: Dict[str, str] = {
     'TTT': 'F', 'TTC': 'F', 'TTA': 'L', 'TTG': 'L',
@@ -102,6 +103,54 @@ ORGANISM_TABLES = {
     'human': _HUMAN_W,
     'homo': _HUMAN_W,
 }
+
+BACTERIA_KEYWORDS = (
+    "escherichia", "coli", "bacillus", "pseudomonas", "streptomyces",
+    "bacterium", "bacteria", "salmonella", "staphylococcus", "streptococcus",
+    "clostridium", "vibrio", "mycobacterium", "helicobacter", "lactobacillus",
+    "corynebacterium", "rhizobium", "agrobacterium", "mycoplasma"
+)
+
+def is_bacteria(organism: str) -> bool:
+    """Check if organism belongs to bacteria domain."""
+    if not organism:
+        return False
+    org = organism.lower().strip()
+    return any(k in org for k in BACTERIA_KEYWORDS)
+
+def get_bacteria_slug(organism: str) -> Optional[str]:
+    """Return a clean slug for a bacteria (e.g. 'Escherichia coli' -> 'ecoli')."""
+    if not is_bacteria(organism):
+        return None
+    org = organism.lower().strip()
+    if any(k in org for k in ("escherichia", "coli", "ecoli")):
+        return "ecoli"
+    slug = re.sub(r"[^a-z0-9]+", "-", org).strip("-")
+    return slug or None
+
+def get_short_name(model_name: str) -> str:
+    name = model_name.lower()
+    for arch in ("qwen", "gpt2", "llama", "mistral", "codon"):
+        if arch in name:
+            return arch
+    return name.split("/")[-1].split("-")[0].replace(".", "") or "model"
+
+def get_model_name(model_name: str, organism: Optional[str] = None) -> str:
+    """Return model name, appending bacteria slug if model is specific to a bacterium."""
+    short = get_short_name(model_name)
+    slug = get_bacteria_slug(organism) if organism else None
+    if not slug:
+        for kw in BACTERIA_KEYWORDS:
+            if kw in model_name.lower():
+                slug = get_bacteria_slug(kw)
+                break
+    if slug and slug not in short:
+        return f"{short}-{slug}-codon-optimization-model"
+    return f"{short}-codon-optimization-model"
+
+def get_output_dir(model_name: str, organism: Optional[str] = None) -> str:
+    """Resolve output directory incorporating bacteria slug if specific to a bacterium."""
+    return f"models/{get_model_name(model_name, organism)}"
 
 DEFAULT_RESTRICTION_SITES: Dict[str, str] = {
     'EcoRI': 'GAATTC',

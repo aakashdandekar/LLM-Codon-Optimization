@@ -1,25 +1,52 @@
 import os
 import sys
+import json
 import argparse
+from typing import Optional
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
 from config import load_config
+from codon_utils import get_short_name, get_model_name, get_output_dir
 
 
-def get_short_name(model_name: str) -> str:
-    name = model_name.lower()
-    for arch in ("qwen", "gpt2", "llama", "mistral", "codon"):
-        if arch in name:
-            return arch
-    return name.split("/")[-1].split("-")[0].replace(".", "") or "model"
-
-
-def get_output_dir(model_name: str) -> str:
-    short = get_short_name(model_name)
-    return f"models/{short}-codon-optimization-model"
+def detect_dataset_organism(dataset_path: Optional[str], max_check: int = 500) -> Optional[str]:
+    """Inspect dataset to detect if it contains samples exclusively from one organism."""
+    if not dataset_path or not os.path.exists(dataset_path):
+        return None
+    try:
+        organisms = set()
+        if dataset_path.endswith(".jsonl"):
+            with open(dataset_path, "r", encoding="utf-8") as f:
+                for i, line in enumerate(f):
+                    if i >= max_check:
+                        break
+                    line = line.strip()
+                    if line:
+                        item = json.loads(line)
+                        org = item.get("organism")
+                        if org:
+                            organisms.add(org.strip())
+                            if len(organisms) > 1:
+                                return None
+        elif dataset_path.endswith(".csv"):
+            import csv
+            with open(dataset_path, "r", encoding="utf-8") as f:
+                for i, row in enumerate(csv.DictReader(f)):
+                    if i >= max_check:
+                        break
+                    org = row.get("organism")
+                    if org:
+                        organisms.add(org.strip())
+                        if len(organisms) > 1:
+                            return None
+        if len(organisms) == 1:
+            return next(iter(organisms))
+    except Exception:
+        pass
+    return None
 
 
 def resolve_or_collect_dataset(
@@ -68,6 +95,7 @@ def main():
     opt_group = parser.add_argument_group("Configuration")
     opt_group.add_argument("--config", type=str, default="config.yaml", help="Path to YAML config (default: config.yaml)")
     opt_group.add_argument("--model", type=str, default=None, help="Base model identifier")
+    opt_group.add_argument("--organism", type=str, default=None, help="Target host organism (e.g. 'Escherichia coli')")
     opt_group.add_argument("--dataset", type=str, default=None, help="Path to dataset (.jsonl or .csv)")
     opt_group.add_argument("--protein", type=str, default=None, help="Target protein sequence for inference")
     opt_group.add_argument("--epochs", type=int, default=None, help="Number of training epochs")
@@ -102,7 +130,8 @@ def main():
 
     if args.tune:
         dataset_path = resolve_or_collect_dataset(args.dataset, max_samples=max_samples, config=cfg)
-        model_out = args.output or (model_cfg.get("output_dir") if args.model is None else None) or get_output_dir(model_name)
+        target_organism = args.organism or model_cfg.get("organism") or detect_dataset_organism(dataset_path)
+        model_out = args.output or (model_cfg.get("output_dir") if args.model is None and not target_organism else None) or get_output_dir(model_name, target_organism)
 
         from tune import run_tuning
         run_tuning(
@@ -111,20 +140,31 @@ def main():
             output_dir=model_out,
             epochs=epochs,
             max_steps=max_steps,
+            organism=target_organism,
             config=cfg
         )
         print(f"\nFine-tuning complete. Checkpoint saved to: {model_out}")
         print("To evaluate this model, run:")
-        print(f"  python main.py --test --model {model_name}\n")
+        test_cmd = f"  python main.py --test --model {model_name}"
+        if target_organism:
+            test_cmd += f" --organism \"{target_organism}\""
+        print(f"{test_cmd}\n")
         return
 
     if args.test:
-        model_dir = args.output or (model_cfg.get("output_dir") if args.model is None else None) or get_output_dir(model_name)
+        target_organism = args.organism or model_cfg.get("organism")
+        candidate_dir = get_output_dir(model_name, target_organism)
+        if not os.path.exists(candidate_dir) and not target_organism:
+            fallback = get_output_dir(model_name, None)
+            if os.path.exists(fallback):
+                candidate_dir = fallback
+        model_dir = args.output or (model_cfg.get("output_dir") if args.model is None and not target_organism else None) or candidate_dir
         protein_seq = args.protein or infer_cfg.get("benchmark_protein")
         from inference import run_test
         run_test(
             model_dir=model_dir,
             protein_seq=protein_seq,
+            organism=target_organism or infer_cfg.get("default_organism"),
             config=cfg
         )
         return

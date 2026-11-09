@@ -15,7 +15,8 @@ from codon_utils import (
     calculate_cai,
     calculate_gc,
     detect_restriction_sites,
-    naive_frequency_optimizer
+    naive_frequency_optimizer,
+    get_output_dir
 )
 
 DEFAULT_BENCHMARK_PROTEIN = (
@@ -75,13 +76,15 @@ def run_test(
     max_new_tokens: Optional[int] = None,
     temperature: Optional[float] = None,
     top_p: Optional[float] = None,
+    organism: Optional[str] = None,
     config: Optional[Dict[str, Any]] = None,
 ):
     cfg = config or load_config()
     model_cfg = cfg.get("model", {})
     infer_cfg = cfg.get("inference", {})
 
-    model_dir = model_dir or model_cfg.get("output_dir", "models/qwen-codon-optimization-model")
+    target_organism = organism or infer_cfg.get("default_organism", "Escherichia coli")
+    model_dir = model_dir or (model_cfg.get("output_dir") if not organism else None) or get_output_dir(model_cfg.get("name", "qwen"), target_organism)
     target_protein = (protein_seq or infer_cfg.get("benchmark_protein") or DEFAULT_BENCHMARK_PROTEIN).strip().upper().rstrip("*")
     estimated_tokens = int(len(target_protein) * 1.8) + 64
     config_limit = infer_cfg.get("max_new_tokens", 1024)
@@ -90,7 +93,7 @@ def run_test(
     top_p = top_p if top_p is not None else infer_cfg.get("top_p", 0.9)
     max_seq_length = model_cfg.get("max_seq_length", 2048)
     load_in_4bit = model_cfg.get("load_in_4bit", True)
-    organism = infer_cfg.get("default_organism", "Escherichia coli")
+    organism = target_organism
 
     if not os.path.exists(model_dir):
         print(f"Model directory not found: {model_dir}")
@@ -191,6 +194,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate fine-tuned codon optimizer")
     parser.add_argument("--config", type=str, default="config.yaml", help="Path to config.yaml")
     parser.add_argument("--model-dir", type=str, default=None)
+    parser.add_argument("--organism", type=str, default=None, help="Target host organism")
     parser.add_argument("--protein", type=str, default=None)
     args = parser.parse_args()
 
@@ -198,5 +202,6 @@ if __name__ == "__main__":
     run_test(
         model_dir=args.model_dir,
         protein_seq=args.protein,
+        organism=args.organism,
         config=cfg
     )

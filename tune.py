@@ -10,6 +10,7 @@ if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
 from config import load_config
+from codon_utils import get_output_dir
 
 
 def format_prompt(protein: str, organism: str, dna: Optional[str] = None, eos_token: str = "") -> str:
@@ -75,6 +76,7 @@ def run_tuning(
     gradient_accumulation_steps: Optional[int] = None,
     learning_rate: Optional[float] = None,
     max_seq_length: Optional[int] = None,
+    organism: Optional[str] = None,
     config: Optional[Dict[str, Any]] = None,
 ):
     cfg = config or load_config()
@@ -82,9 +84,10 @@ def run_tuning(
     train_cfg = cfg.get("training", {})
     lora_cfg = train_cfg.get("lora", {})
 
+    target_organism = organism or model_cfg.get("organism")
     model_name = model_name or model_cfg.get("name", "unsloth/Qwen2.5-Coder-1.5B-Instruct")
     dataset_path = dataset_path or cfg.get("data", {}).get("output_path", "data/dataset.jsonl")
-    output_dir = output_dir or model_cfg.get("output_dir", "models/qwen-codon-optimization-model")
+    output_dir = output_dir or (model_cfg.get("output_dir") if not target_organism else None) or get_output_dir(model_name, target_organism)
     epochs = epochs if epochs is not None else train_cfg.get("epochs", 1)
     max_steps = max_steps if max_steps is not None else train_cfg.get("max_steps", -1)
     batch_size = batch_size if batch_size is not None else train_cfg.get("batch_size", 1)
@@ -188,6 +191,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Fine-tune an LLM for codon optimization with Unsloth")
     parser.add_argument("--config", type=str, default="config.yaml", help="Path to config.yaml")
     parser.add_argument("--model", type=str, default=None)
+    parser.add_argument("--organism", type=str, default=None, help="Target host organism")
     parser.add_argument("--dataset", type=str, default=None)
     parser.add_argument("--output", type=str, default=None)
     parser.add_argument("--epochs", type=int, default=None)
@@ -201,5 +205,6 @@ if __name__ == "__main__":
         output_dir=args.output,
         epochs=args.epochs,
         max_steps=args.max_steps,
+        organism=args.organism,
         config=cfg
     )
