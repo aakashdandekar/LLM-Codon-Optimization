@@ -1,9 +1,13 @@
 import os
 import sys
 import json
+import warnings
 from typing import Optional, Dict, Any
 
 os.environ.setdefault("TRITON_CACHE_DIR", "/tmp/triton")
+os.environ.setdefault("TORCH_CPP_LOG_LEVEL", "ERROR")
+os.environ.setdefault("TORCH_LOGS", "-all")
+warnings.filterwarnings("ignore")
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:
@@ -28,7 +32,7 @@ def format_prompt(protein: str, organism: str, dna: Optional[str] = None, eos_to
     return prompt
 
 
-def load_local_dataset(dataset_path: str, eos_token: str = ""):
+def load_local_dataset(dataset_path: str, eos_token: str = "", default_organism: str = "Escherichia coli"):
     from datasets import Dataset
 
     entries = []
@@ -41,7 +45,7 @@ def load_local_dataset(dataset_path: str, eos_token: str = ""):
                     entries.append({
                         "text": format_prompt(
                             item["protein"],
-                            item.get("organism", "Escherichia coli"),
+                            item.get("organism") or default_organism,
                             item["dna"],
                             eos_token=eos_token
                         )
@@ -52,7 +56,7 @@ def load_local_dataset(dataset_path: str, eos_token: str = ""):
             for row in csv.DictReader(f):
                 prot = row.get("protein") or row.get("amino_acid_sequence", "")
                 dna = row.get("dna") or row.get("coding_sequence", "")
-                org = row.get("organism", "Escherichia coli")
+                org = row.get("organism") or default_organism
                 if prot and dna:
                     entries.append({
                         "text": format_prompt(prot, org, dna, eos_token=eos_token)
@@ -134,7 +138,7 @@ def run_tuning(
 
     eos_token = tokenizer.eos_token or "<|im_end|>"
     print(f"Loading dataset from {dataset_path} (eos_token: {repr(eos_token)})...")
-    dataset = load_local_dataset(dataset_path, eos_token=eos_token)
+    dataset = load_local_dataset(dataset_path, eos_token=eos_token, default_organism=target_organism or "Escherichia coli")
     print(f"Loaded {len(dataset)} examples.")
 
     is_bf16 = torch.cuda.is_available() and torch.cuda.is_bf16_supported()

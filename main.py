@@ -1,8 +1,13 @@
 import os
 import sys
 import json
+import warnings
 import argparse
 from typing import Optional
+
+os.environ.setdefault("TORCH_CPP_LOG_LEVEL", "ERROR")
+os.environ.setdefault("TORCH_LOGS", "-all")
+warnings.filterwarnings("ignore")
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:
@@ -52,6 +57,7 @@ def detect_dataset_organism(dataset_path: Optional[str], max_check: int = 500) -
 def resolve_or_collect_dataset(
     dataset_arg: str | None,
     max_samples: int | None = None,
+    target_organism: str | None = None,
     config: dict | None = None
 ) -> str:
     cfg = config or load_config()
@@ -62,7 +68,7 @@ def resolve_or_collect_dataset(
         if os.path.exists(dataset_arg):
             print(f"Using dataset: {dataset_arg}")
             return dataset_arg
-        print(f"Warning: specified dataset '{dataset_arg}' not found on disk.")
+        raise FileNotFoundError(f"Specified dataset '{dataset_arg}' not found on disk.")
 
     candidates = data_cfg.get("candidate_paths", [
         "data/dataset.jsonl",
@@ -70,6 +76,25 @@ def resolve_or_collect_dataset(
         "data/dataset.csv",
         "dataset.csv"
     ])
+
+    if target_organism:
+        from codon_utils import get_bacteria_slug
+        slug = get_bacteria_slug(target_organism) or target_organism.lower().replace(" ", "_")
+        for c in [f"data/dataset_{slug}.jsonl", f"dataset_{slug}.jsonl"]:
+            if os.path.exists(c):
+                print(f"Found host-matched dataset: {c}")
+                return c
+        for c in candidates:
+            if os.path.exists(c):
+                c_org = detect_dataset_organism(c)
+                if c_org is None or c_org.lower() == target_organism.lower():
+                    print(f"Found compatible local dataset: {c}")
+                    return c
+        print(f"No local dataset found for {target_organism}. Collecting/generating...")
+        from data_collection import collect_and_validate
+        target_path = f"data/dataset_{slug}.jsonl"
+        return collect_and_validate(max_samples=resolved_max_samples, output_path=target_path, organism=target_organism, config=cfg)
+
     for c in candidates:
         if os.path.exists(c):
             print(f"Found local dataset: {c}")
@@ -123,14 +148,18 @@ def main():
 
     if args.collect:
         from data_collection import collect_and_validate
-        output_file = args.output or data_cfg.get("output_path", "data/dataset.jsonl")
-        collect_and_validate(max_samples=max_samples, output_path=output_file, config=cfg)
+        from codon_utils import get_bacteria_slug
+        target_organism = args.organism or model_cfg.get("organism")
+        slug = (get_bacteria_slug(target_organism) or target_organism.lower().replace(" ", "_")) if target_organism else None
+        output_file = args.output or (f"data/dataset_{slug}.jsonl" if slug else data_cfg.get("output_path", "data/dataset.jsonl"))
+        collect_and_validate(max_samples=max_samples, output_path=output_file, organism=target_organism, config=cfg)
         print("Data collection complete.")
         return
 
     if args.tune:
-        dataset_path = resolve_or_collect_dataset(args.dataset, max_samples=max_samples, config=cfg)
-        target_organism = args.organism or model_cfg.get("organism") or detect_dataset_organism(dataset_path)
+        target_organism = args.organism or model_cfg.get("organism")
+        dataset_path = resolve_or_collect_dataset(args.dataset, max_samples=max_samples, target_organism=target_organism, config=cfg)
+        target_organism = target_organism or detect_dataset_organism(dataset_path)
         model_out = args.output or (model_cfg.get("output_dir") if args.model is None and not target_organism else None) or get_output_dir(model_name, target_organism)
 
         from tune import run_tuning
@@ -153,12 +182,15 @@ def main():
 
     if args.test:
         target_organism = args.organism or model_cfg.get("organism")
-        candidate_dir = get_output_dir(model_name, target_organism)
-        if not os.path.exists(candidate_dir) and not target_organism:
-            fallback = get_output_dir(model_name, None)
-            if os.path.exists(fallback):
-                candidate_dir = fallback
-        model_dir = args.output or (model_cfg.get("output_dir") if args.model is None and not target_organism else None) or candidate_dir
+        if args.model and (os.path.exists(args.model) or "/" in args.model):
+            model_dir = args.output or args.model
+        else:
+            candidate_dir = get_output_dir(model_name, target_organism)
+            if not os.path.exists(candidate_dir) and not target_organism:
+                fallback = get_output_dir(model_name, None)
+                if os.path.exists(fallback):
+                    candidate_dir = fallback
+            model_dir = args.output or (model_cfg.get("output_dir") if args.model is None and not target_organism else None) or candidate_dir
         protein_seq = args.protein or infer_cfg.get("benchmark_protein")
         from inference import run_test
         run_test(

@@ -12,7 +12,8 @@ from codon_utils import (
     YEAST_CODON_USAGE,
     HUMAN_CODON_USAGE,
     translate_dna,
-    calculate_gc
+    calculate_gc,
+    is_bacteria
 )
 
 IUPAC_AMINO_ACIDS = set("ACDEFGHIKLMNPQRSTVWY")
@@ -33,10 +34,10 @@ CURATED_GENES = [
 
 
 def infer_taxonomy(organism: str) -> str:
-    org = organism.lower()
-    if any(k in org for k in ["escherichia", "coli", "bacillus", "pseudomonas", "streptomyces", "bacterium"]):
+    if is_bacteria(organism):
         return "bacteria"
-    elif any(k in org for k in ["saccharomyces", "homo", "sapiens", "cricetulus", "mus", "arabidopsis", "drosophila", "yeast"]):
+    org = organism.lower()
+    if any(k in org for k in ["saccharomyces", "homo", "sapiens", "cricetulus", "mus", "arabidopsis", "drosophila", "yeast"]):
         return "eukaryota"
     elif any(k in org for k in ["methano", "archaea", "sulfolobus"]):
         return "archaea"
@@ -90,12 +91,15 @@ def generate_synthetic_control(
     n_samples: int = 500,
     seed: int = 42,
     min_length: int = 40,
-    max_length: int = 160
+    max_length: int = 160,
+    organism: Optional[str] = None
 ) -> List[Dict[str, str]]:
     """Generate synthetic protein-coding sequence pairs weighted by organism codon frequencies."""
     records = []
 
     for name, org, tax, prot, dna in CURATED_GENES:
+        if organism and organism.lower() not in org.lower() and org.lower() not in organism.lower():
+            continue
         records.append({
             "gene_name": name,
             "organism": org,
@@ -121,7 +125,17 @@ def generate_synthetic_control(
             weights_dict[aa] = (codons, w)
         weights_by_host[org] = (tax, weights_dict)
 
-    host_names = list(weights_by_host.keys())
+    if organism:
+        matched_host = None
+        for h in weights_by_host:
+            if organism.lower() in h.lower() or h.lower() in organism.lower():
+                matched_host = h
+                break
+        if not matched_host:
+            matched_host = "Escherichia coli" if is_bacteria(organism) else "Homo sapiens"
+        host_names = [matched_host]
+    else:
+        host_names = list(weights_by_host.keys())
 
     while len(records) < n_samples:
         org = random.choice(host_names)
@@ -139,8 +153,8 @@ def generate_synthetic_control(
 
         records.append({
             "gene_name": f"syn_{len(records) + 1}",
-            "organism": org,
-            "taxonomy": tax,
+            "organism": organism or org,
+            "taxonomy": infer_taxonomy(organism or org),
             "protein": prot,
             "dna": dna
         })
@@ -150,7 +164,8 @@ def generate_synthetic_control(
 
 def fetch_huggingface_dataset(
     max_samples: int = 10000,
-    dataset_repos: Optional[List[str]] = None
+    dataset_repos: Optional[List[str]] = None,
+    organism: Optional[str] = None
 ) -> List[Dict[str, str]]:
     repos = dataset_repos if dataset_repos is not None else PREDEFINED_DATASETS
     if not repos:
@@ -169,6 +184,8 @@ def fetch_huggingface_dataset(
             collected = []
             for row in ds:
                 org = row.get("organism") or row.get("species") or "Standard Host"
+                if organism and organism.lower() not in str(org).lower():
+                    continue
                 prot = row.get("protein") or row.get("amino_acid_sequence") or ""
                 dna = row.get("dna") or row.get("coding_sequence") or ""
                 if prot and dna:
@@ -191,6 +208,7 @@ def fetch_huggingface_dataset(
 def collect_and_validate(
     max_samples: Optional[int] = None,
     output_path: Optional[str] = None,
+    organism: Optional[str] = None,
     config: Optional[Dict[str, Any]] = None
 ) -> str:
     cfg = config or load_config()
@@ -201,16 +219,21 @@ def collect_and_validate(
     synth_cfg = data_cfg.get("synthetic", {})
 
     os.makedirs(os.path.dirname(os.path.abspath(target_output)), exist_ok=True)
-    print(f"Collecting {target_samples} sequence pairs -> {target_output}")
+    msg = f"Collecting {target_samples} sequence pairs"
+    if organism:
+        msg += f" for host '{organism}'"
+    print(f"{msg} -> {target_output}")
 
-    raw_records = fetch_huggingface_dataset(max_samples=target_samples, dataset_repos=hf_repos)
+    raw_records = fetch_huggingface_dataset(max_samples=target_samples, dataset_repos=hf_repos, organism=organism)
     if not raw_records:
-        print("No external dataset fetched. Generating synthetic sequence pairs with host codon weights...")
+        source_desc = f"for '{organism}'" if organism else "with host codon weights"
+        print(f"No external dataset fetched. Generating synthetic sequence pairs {source_desc}...")
         raw_records = generate_synthetic_control(
             n_samples=target_samples,
             seed=synth_cfg.get("seed", 42),
             min_length=synth_cfg.get("min_length", 40),
-            max_length=synth_cfg.get("max_length", 160)
+            max_length=synth_cfg.get("max_length", 160),
+            organism=organism
         )
 
     print(f"Validating {len(raw_records)} sequences...")
@@ -242,8 +265,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Collect and validate codon optimization sequences")
     parser.add_argument("--config", type=str, default="config.yaml", help="Path to config.yaml")
     parser.add_argument("--max-samples", type=int, default=None)
+    parser.add_argument("--organism", type=str, default=None, help="Target host organism")
     parser.add_argument("--output", type=str, default=None)
     args = parser.parse_args()
 
     cfg = load_config(args.config)
-    collect_and_validate(max_samples=args.max_samples, output_path=args.output, config=cfg)
+    collect_and_validate(max_samples=args.max_samples, output_path=args.output, organism=args.organism, config=cfg)

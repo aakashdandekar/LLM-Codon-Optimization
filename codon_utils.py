@@ -198,6 +198,17 @@ def validate_candidate(target_protein: str, candidate_dna: str) -> Tuple[bool, s
     except ValueError as e:
         return False, str(e)
 
+def resolve_organism_key(organism: str) -> str:
+    """Map organism string or abbreviation to canonical key ('ecoli', 'yeast', 'human')."""
+    org = organism.lower().strip()
+    if any(k in org for k in ("yeast", "saccharomyces", "cerevisiae")):
+        return "yeast"
+    if any(k in org for k in ("human", "homo", "sapiens")):
+        return "human"
+    return "ecoli"
+
+_CACHED_ENZYMES = None
+
 def calculate_cai(dna: str, usage_table: Dict[str, float] | None = None, organism: str | None = None) -> float:
     dna = dna.upper().strip()
     if len(dna) < 3 or len(dna) % 3 != 0:
@@ -206,7 +217,7 @@ def calculate_cai(dna: str, usage_table: Dict[str, float] | None = None, organis
     if usage_table is not None:
         w_table = _build_relative_adaptiveness(usage_table)
     elif organism:
-        org_key = organism.lower().split()[0]
+        org_key = resolve_organism_key(organism)
         w_table = ORGANISM_TABLES.get(org_key, _ECOLI_W)
     else:
         w_table = _ECOLI_W
@@ -233,23 +244,31 @@ def calculate_gc(dna: str) -> float:
     return (gc_count / len(dna)) * 100.0
 
 def detect_restriction_sites(dna: str, enzymes: Dict[str, str] | None = None) -> List[str]:
+    global _CACHED_ENZYMES
     dna = dna.upper().strip()
     if enzymes is None:
-        try:
-            from config import load_config
-            cfg_enzymes = load_config().get("restriction_enzymes")
-            enzymes = cfg_enzymes if cfg_enzymes else DEFAULT_RESTRICTION_SITES
-        except Exception:
-            enzymes = DEFAULT_RESTRICTION_SITES
-    found = []
-    for name, site in enzymes.items():
-        if site in dna:
-            found.append(f"{name} ({site})")
-    return found
+        if _CACHED_ENZYMES is None:
+            try:
+                from config import load_config
+                _CACHED_ENZYMES = load_config().get("restriction_enzymes") or DEFAULT_RESTRICTION_SITES
+            except Exception:
+                _CACHED_ENZYMES = DEFAULT_RESTRICTION_SITES
+        enzymes = _CACHED_ENZYMES
+    return [f"{name} ({site})" for name, site in enzymes.items() if site in dna]
 
-def naive_frequency_optimizer(protein: str, usage_table: Dict[str, float] | None = None) -> str:
+def naive_frequency_optimizer(
+    protein: str,
+    usage_table: Dict[str, float] | None = None,
+    organism: str | None = None
+) -> str:
     protein = protein.upper().rstrip('*')
-    table = ECOLI_CODON_USAGE if usage_table is None else usage_table
+    if usage_table is not None:
+        table = usage_table
+    elif organism:
+        org_key = resolve_organism_key(organism)
+        table = YEAST_CODON_USAGE if org_key == "yeast" else (HUMAN_CODON_USAGE if org_key == "human" else ECOLI_CODON_USAGE)
+    else:
+        table = ECOLI_CODON_USAGE
     
     best_codons: Dict[str, str] = {}
     for aa, codons in SYNONYMOUS_CODONS.items():

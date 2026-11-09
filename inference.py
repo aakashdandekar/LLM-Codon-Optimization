@@ -1,9 +1,13 @@
 import os
 import sys
 import re
+import warnings
 from typing import Optional, Dict, Any
 
 os.environ.setdefault("TRITON_CACHE_DIR", "/tmp/triton")
+os.environ.setdefault("TORCH_CPP_LOG_LEVEL", "ERROR")
+os.environ.setdefault("TORCH_LOGS", "-all")
+warnings.filterwarnings("ignore")
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:
@@ -95,7 +99,8 @@ def run_test(
     load_in_4bit = model_cfg.get("load_in_4bit", True)
     organism = target_organism
 
-    if not os.path.exists(model_dir):
+    is_remote_hf = "/" in model_dir and not os.path.exists(model_dir)
+    if not os.path.exists(model_dir) and not is_remote_hf:
         print(f"Model directory not found: {model_dir}")
         print("Run fine-tuning first: python main.py --tune")
         return
@@ -147,7 +152,7 @@ def run_test(
     candidate_dna = extract_dna_from_output(generated_text, expected_length_aa=len(target_protein))
 
     # Compare against traditional naive frequency selection
-    naive_dna = naive_frequency_optimizer(target_protein)
+    naive_dna = naive_frequency_optimizer(target_protein, organism=organism)
 
     cand_valid, cand_reason = validate_candidate(target_protein, candidate_dna)
     naive_valid, naive_reason = validate_candidate(target_protein, naive_dna)
