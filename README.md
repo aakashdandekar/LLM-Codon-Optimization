@@ -100,7 +100,7 @@ Requires **Python 3.10–3.12** and a CUDA-capable GPU.
 
 ```bash
 # Clone the repository
-git clone https://github.com/<your-username>/llm-codon-optimization.git
+git clone https://github.com/aakashdandekar/llm-codon-optimization.git
 cd llm-codon-optimization
 
 # Create and activate a virtual environment
