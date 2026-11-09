@@ -4,7 +4,6 @@
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.x-EE4C2C?logo=pytorch&logoColor=white)](https://pytorch.org)
 [![Unsloth](https://img.shields.io/badge/Unsloth-Fast%20LoRA-brightgreen)](https://github.com/unslothai/unsloth)
 [![HuggingFace](https://img.shields.io/badge/HuggingFace-Transformers-FFD21E?logo=huggingface&logoColor=black)](https://huggingface.co)
-[![Hardware](https://img.shields.io/badge/Trained%20on-RTX%204050%20Laptop%20(6GB)-76B900?logo=nvidia&logoColor=white)](https://nvidia.com)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
 > Fine-tuning autoregressive Large Language Models to translate proteins into biologically harmonized DNA coding sequences—learning contextual biology where classical algorithms fail.
