@@ -161,29 +161,6 @@ $$\text{CAI} = \exp\left( \frac{1}{L} \sum_{k=1}^{L} \ln(w_k) \right)$$
 
 ---
 
-## Repository Structure
-
-```
-llm-codon-optimization/
-├── main.py                     # CLI entrypoint coordinating pipeline execution
-├── tune.py                     # Unsloth 4-bit QLoRA fine-tuning engine
-├── inference.py                # Generation, biological extraction, and comparative benchmarks
-├── data_collection.py          # Data acquisition and biological schema validator
-├── codon_utils.py              # Translation tables, CAI/GC analyzers, and restriction scanners
-├── config.yaml                 # Central declarative hyperparameter and environment configuration
-├── config.py                   # YAML configuration loader
-├── documentation.md            # Comprehensive theoretical and operational documentation
-├── pyproject.toml              # Packaging specification and CLI console script setup
-├── requirements.txt            # Python dependencies
-├── LICENSE                     # Apache License, Version 2.0
-├── data/
-│   └── .gitkeep                # Placeholder for local dataset corpus
-└── models/
-    └── .gitkeep                # Placeholder for fine-tuned LoRA checkpoints
-```
-
----
-
 ## License
 
 This project is licensed under the **Apache License, Version 2.0**. See the [LICENSE](LICENSE) file for complete details.
