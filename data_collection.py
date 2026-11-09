@@ -1,4 +1,14 @@
+#!/usr/bin/env python3
 import os
+import sys
+
+_venv_py = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".venv", "bin", "python")
+if os.path.exists(_venv_py) and os.path.abspath(sys.executable) != os.path.abspath(_venv_py):
+    try:
+        import datasets  # noqa: F401
+    except ImportError:
+        os.execv(_venv_py, [_venv_py] + sys.argv)
+
 import json
 import re
 import random

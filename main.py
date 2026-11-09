@@ -1,5 +1,15 @@
+#!/usr/bin/env python3
 import os
 import sys
+
+_venv_py = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".venv", "bin", "python")
+if os.path.exists(_venv_py) and os.path.abspath(sys.executable) != os.path.abspath(_venv_py):
+    try:
+        import torch  # noqa: F401
+        import unsloth  # noqa: F401
+    except ImportError:
+        os.execv(_venv_py, [_venv_py] + sys.argv)
+
 import json
 import warnings
 import argparse
@@ -66,6 +76,10 @@ def resolve_or_collect_dataset(
 
     if dataset_arg:
         if os.path.exists(dataset_arg):
+            if target_organism:
+                detected = detect_dataset_organism(dataset_arg)
+                if detected and detected.lower() != target_organism.lower():
+                    print(f"Warning: Specified dataset '{dataset_arg}' appears to contain data for '{detected}', but target organism is '{target_organism}'.")
             print(f"Using dataset: {dataset_arg}")
             return dataset_arg
         raise FileNotFoundError(f"Specified dataset '{dataset_arg}' not found on disk.")
@@ -174,7 +188,7 @@ def main():
         )
         print(f"\nFine-tuning complete. Checkpoint saved to: {model_out}")
         print("To evaluate this model, run:")
-        test_cmd = f"  python main.py --test --model {model_name}"
+        test_cmd = f"  python main.py --test --model {model_out}"
         if target_organism:
             test_cmd += f" --organism \"{target_organism}\""
         print(f"{test_cmd}\n")
@@ -182,10 +196,10 @@ def main():
 
     if args.test:
         target_organism = args.organism or model_cfg.get("organism")
-        if args.model and (os.path.exists(args.model) or "/" in args.model):
+        candidate_dir = get_output_dir(model_name, target_organism)
+        if args.model:
             model_dir = args.output or args.model
         else:
-            candidate_dir = get_output_dir(model_name, target_organism)
             if not os.path.exists(candidate_dir) and not target_organism:
                 fallback = get_output_dir(model_name, None)
                 if os.path.exists(fallback):

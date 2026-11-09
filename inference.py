@@ -1,5 +1,15 @@
+#!/usr/bin/env python3
 import os
 import sys
+
+_venv_py = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".venv", "bin", "python")
+if os.path.exists(_venv_py) and os.path.abspath(sys.executable) != os.path.abspath(_venv_py):
+    try:
+        import torch  # noqa: F401
+        import unsloth  # noqa: F401
+    except ImportError:
+        os.execv(_venv_py, [_venv_py] + sys.argv)
+
 import re
 import warnings
 from typing import Optional, Dict, Any
@@ -110,7 +120,7 @@ def run_test(
         import torch
     except ImportError as e:
         print(f"Error: Missing inference dependencies: {e}")
-        print("Please ensure unsloth and torch are installed.")
+        print("Please activate your virtual environment ('source .venv/bin/activate') or install dependencies ('uv sync' / 'pip install -r requirements.txt').")
         sys.exit(1)
 
     print(f"Loading model from {model_dir}...")
