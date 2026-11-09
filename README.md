@@ -111,7 +111,21 @@ source .venv/bin/activate
 uv pip install -r requirements.txt
 ```
 
-### 2. Inference and Benchmarking
+### 2. Data Collection and Validation (Optional)
+Extract, format, and validate sequence pairs from repositories or generate synthetic controls conforming to biological schema rules:
+
+```bash
+python main.py --collect --max-samples 5000
+```
+
+### 3.  Fine-Tuning
+Fine-tune the model with 4-bit QLoRA and response-only loss masking:
+
+```bash
+python main.py --tune
+```
+
+### 4. Inference and Benchmarking
 Execute the comparative benchmark on standard GFP or provide a custom amino acid sequence:
 
 ```bash
@@ -120,20 +134,6 @@ python main.py --test
 
 # Optimize a specific custom protein sequence
 python main.py --test --protein "MAENQKKIQNALEKLKASRLEKATLLEEKLRQSQEELQRQRKQEERKRQEEKL"
-```
-
-### 3. Data Collection and Validation (Optional)
-Extract, format, and validate sequence pairs from repositories or generate synthetic controls conforming to biological schema rules:
-
-```bash
-python main.py --collect --max-samples 5000 --output data/dataset.jsonl
-```
-
-### 4. Fine-Tuning
-Fine-tune the model with 4-bit QLoRA and response-only loss masking:
-
-```bash
-python main.py --tune --model unsloth/Qwen2.5-Coder-1.5B-Instruct --epochs 1
 ```
 
 ---
