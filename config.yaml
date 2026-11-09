@@ -1,0 +1,67 @@
+# LLM Codon Optimization Pipeline Configuration
+
+model:
+  name: "unsloth/Qwen2.5-Coder-1.5B-Instruct"
+  output_dir: "models/qwen-codon-optimization-model"
+  max_seq_length: 2048
+  load_in_4bit: true
+
+training:
+  epochs: 1
+  max_steps: -1
+  batch_size: 1
+  gradient_accumulation_steps: 4
+  learning_rate: 0.0002
+  warmup_steps: 5
+  logging_steps: 1
+  weight_decay: 0.01
+  optim: "adamw_8bit"
+  lr_scheduler_type: "linear"
+  seed: 42
+  dataset_num_proc: 2
+  lora:
+    r: 16
+    lora_alpha: 32
+    lora_dropout: 0
+    bias: "none"
+    use_gradient_checkpointing: "unsloth"
+    target_modules:
+      - "q_proj"
+      - "k_proj"
+      - "v_proj"
+      - "o_proj"
+      - "gate_proj"
+      - "up_proj"
+      - "down_proj"
+
+data:
+  output_path: "data/dataset.jsonl"
+  max_samples: 5000
+  candidate_paths:
+    - "data/dataset.jsonl"
+    - "dataset.jsonl"
+    - "data/dataset.csv"
+    - "dataset.csv"
+  huggingface_datasets:
+    - "adibvafa/CodonTransformer"
+    - "alegendaryfish/CodonTranslator-data"
+    - "jheuschkel/cds-dataset"
+  synthetic:
+    seed: 42
+    min_length: 40
+    max_length: 160
+
+inference:
+  default_organism: "Escherichia coli"
+  max_new_tokens: 1024
+  temperature: 0.2
+  top_p: 0.9
+  benchmark_protein: "MSKGEELFTGVVPILVELDGDVNGHKFSVSGEGEGDATYGKLTLKFICTTGKLPVPWPTLVTTFSYGVQCFSRYPDHMKQHDFFKSAMPEGYVQERTIFFKDDGNYKTRAEVKFEGDTLVNRIELKGIDFKEDGNILGHKLEYNYNSHNVYIMADKQKNGIKVNFKIRHNIEDGSVQLADHYQQNTPIGDGPVLLPDNHYLSTQSALSKDPNEKRDHMVLLEFVTAAGITHGMDELYK"
+
+restriction_enzymes:
+  EcoRI: "GAATTC"
+  BamHI: "GGATCC"
+  HindIII: "AAGCTT"
+  XhoI: "CTCGAG"
+  NdeI: "CATATG"
+  NcoI: "CCATGG"

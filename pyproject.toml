@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-codon-optimization"
+version = "0.1.0"
+description = "LLM-based codon optimization fine-tuning and inference pipeline"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+authors = [
+    { name = "Aakash Dandekar", email = "aakashdandekar2006@gmail.com" }
+]
+requires-python = ">=3.10, <3.13"
+dependencies = [
+    "torch>=2.2.0",
+    "transformers>=4.40.0",
+    "datasets>=2.18.0",
+    "accelerate>=0.28.0",
+    "bitsandbytes>=0.43.0",
+    "trl>=0.8.0",
+    "unsloth",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+codon-opt = "main:main"
+
+[tool.setuptools]
+py-modules = ["main", "tune", "inference", "data_collection", "codon_utils", "config"]
