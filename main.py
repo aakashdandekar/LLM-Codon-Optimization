@@ -20,7 +20,7 @@ if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
 from config import load_config
-from codon_utils import get_short_name, get_model_name, get_output_dir
+from codon_utils import get_short_name, get_model_name, get_output_dir, resolve_organism_key
 
 
 def detect_dataset_organism(dataset_path: Optional[str], max_check: int = 500) -> Optional[str]:
@@ -88,17 +88,16 @@ def resolve_or_collect_dataset(
     ])
 
     if target_organism:
-        from codon_utils import get_bacteria_slug, resolve_organism_key
+        from codon_utils import get_bacteria_slug
         slug = get_bacteria_slug(target_organism) or target_organism.lower().replace(" ", "_")
         for c in [f"data/dataset_{slug}.jsonl", f"dataset_{slug}.jsonl"]:
             if os.path.exists(c):
                 print(f"Found host-matched dataset: {c}")
                 return c
-        target_key = resolve_organism_key(target_organism)
         for c in candidates:
             if os.path.exists(c):
                 c_org = detect_dataset_organism(c)
-                if c_org and (c_org.lower() == target_organism.lower() or resolve_organism_key(c_org) == target_key):
+                if c_org and (c_org.lower() == target_organism.lower() or resolve_organism_key(c_org) == resolve_organism_key(target_organism)):
                     print(f"Found compatible local dataset: {c}")
                     return c
         print(f"No local dataset found for {target_organism}. Collecting/generating...")

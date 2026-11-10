@@ -205,7 +205,7 @@ def fetch_huggingface_dataset(
         return []
 
     if not is_huggingface_reachable():
-        print("Notice: Hugging Face is unreachable (offline or sandboxed); skipping remote fetch.")
+        print("Hugging Face is unreachable (offline/restricted); skipping remote dataset fetch.")
         return []
 
     try:
