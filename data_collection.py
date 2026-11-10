@@ -4,10 +4,7 @@ import sys
 
 _venv_py = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".venv", "bin", "python")
 if os.path.exists(_venv_py) and os.path.abspath(sys.executable) != os.path.abspath(_venv_py):
-    try:
-        import datasets  # noqa: F401
-    except ImportError:
-        os.execv(_venv_py, [_venv_py] + sys.argv)
+    os.execv(_venv_py, [_venv_py] + sys.argv)
 
 import json
 import re
@@ -23,7 +20,8 @@ from codon_utils import (
     HUMAN_CODON_USAGE,
     translate_dna,
     calculate_gc,
-    is_bacteria
+    is_bacteria,
+    resolve_organism_key,
 )
 
 IUPAC_AMINO_ACIDS = set("ACDEFGHIKLMNPQRSTVWY")
@@ -108,8 +106,14 @@ def generate_synthetic_control(
     records = []
 
     for name, org, tax, prot, dna in CURATED_GENES:
-        if organism and organism.lower() not in org.lower() and org.lower() not in organism.lower():
-            continue
+        if organism:
+            org_match = (
+                organism.lower() in org.lower()
+                or org.lower() in organism.lower()
+                or resolve_organism_key(organism) == resolve_organism_key(org)
+            )
+            if not org_match:
+                continue
         records.append({
             "gene_name": name,
             "organism": org,
@@ -136,21 +140,31 @@ def generate_synthetic_control(
         weights_by_host[org] = (tax, weights_dict)
 
     if organism:
-        matched_host = None
-        for h in weights_by_host:
-            if organism.lower() in h.lower() or h.lower() in organism.lower():
-                matched_host = h
-                break
+        canonical = resolve_organism_key(organism)
+        canonical_map = {
+            "ecoli": "Escherichia coli",
+            "yeast": "Saccharomyces cerevisiae",
+            "human": "Homo sapiens",
+        }
+        matched_host = canonical_map.get(canonical)
+        if not matched_host:
+            for h in weights_by_host:
+                if organism.lower() in h.lower() or h.lower() in organism.lower():
+                    matched_host = h
+                    break
         if not matched_host:
             matched_host = "Escherichia coli" if is_bacteria(organism) else "Homo sapiens"
         host_names = [matched_host]
     else:
         host_names = list(weights_by_host.keys())
 
+    min_l = min(min_length, max_length)
+    max_l = max(min_length, max_length)
+
     while len(records) < n_samples:
         org = random.choice(host_names)
         tax, codon_weights = weights_by_host[org]
-        length = random.randint(min_length, max_length)
+        length = random.randint(min_l, max_l)
         prot_chars = [random.choice(amino_acids) for _ in range(length)]
         prot = "".join(prot_chars)
 
@@ -194,8 +208,14 @@ def fetch_huggingface_dataset(
             collected = []
             for row in ds:
                 org = row.get("organism") or row.get("species") or "Standard Host"
-                if organism and organism.lower() not in str(org).lower():
-                    continue
+                if organism:
+                    org_match = (
+                        organism.lower() in str(org).lower()
+                        or str(org).lower() in organism.lower()
+                        or resolve_organism_key(organism) == resolve_organism_key(str(org))
+                    )
+                    if not org_match:
+                        continue
                 prot = row.get("protein") or row.get("amino_acid_sequence") or ""
                 dna = row.get("dna") or row.get("coding_sequence") or ""
                 if prot and dna:

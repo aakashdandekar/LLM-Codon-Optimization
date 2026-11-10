@@ -1,15 +1,6 @@
 #!/usr/bin/env python3
 import os
 import sys
-
-_venv_py = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".venv", "bin", "python")
-if os.path.exists(_venv_py) and os.path.abspath(sys.executable) != os.path.abspath(_venv_py):
-    try:
-        import torch  # noqa: F401
-        import unsloth  # noqa: F401
-    except ImportError:
-        os.execv(_venv_py, [_venv_py] + sys.argv)
-
 import json
 import warnings
 from typing import Optional, Dict, Any
@@ -19,27 +10,16 @@ os.environ.setdefault("TORCH_CPP_LOG_LEVEL", "ERROR")
 os.environ.setdefault("TORCH_LOGS", "-all")
 warnings.filterwarnings("ignore")
 
+_venv_py = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".venv", "bin", "python")
+if os.path.exists(_venv_py) and os.path.abspath(sys.executable) != os.path.abspath(_venv_py):
+    os.execv(_venv_py, [_venv_py] + sys.argv)
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
 from config import load_config
-from codon_utils import get_output_dir
-
-
-def format_prompt(protein: str, organism: str, dna: Optional[str] = None, eos_token: str = "") -> str:
-    prompt = (
-        "Below is an instruction that describes a biological task, paired with an input that provides further context. "
-        "Write a response that appropriately completes the request.\n\n"
-        "### Instruction:\n"
-        f"Optimize the following protein sequence into a high-expression DNA coding sequence for {organism}.\n\n"
-        "### Input:\n"
-        f"{protein}\n\n"
-        "### Response:\n"
-    )
-    if dna:
-        prompt += dna + eos_token
-    return prompt
+from codon_utils import get_output_dir, format_prompt
 
 
 def load_local_dataset(dataset_path: str, eos_token: str = "", default_organism: str = "Escherichia coli"):
@@ -52,14 +32,17 @@ def load_local_dataset(dataset_path: str, eos_token: str = "", default_organism:
                 line = line.strip()
                 if line:
                     item = json.loads(line)
-                    entries.append({
-                        "text": format_prompt(
-                            item["protein"],
-                            item.get("organism") or default_organism,
-                            item["dna"],
-                            eos_token=eos_token
-                        )
-                    })
+                    prot = item.get("protein") or item.get("amino_acid_sequence", "")
+                    dna = item.get("dna") or item.get("coding_sequence", "")
+                    if prot and dna:
+                        entries.append({
+                            "text": format_prompt(
+                                prot,
+                                item.get("organism") or default_organism,
+                                dna,
+                                eos_token=eos_token
+                            )
+                        })
     elif dataset_path.endswith(".csv"):
         import csv
         with open(dataset_path, "r", encoding="utf-8") as f:
@@ -108,8 +91,6 @@ def run_tuning(
     gradient_accumulation_steps = gradient_accumulation_steps if gradient_accumulation_steps is not None else train_cfg.get("gradient_accumulation_steps", 4)
     learning_rate = learning_rate if learning_rate is not None else train_cfg.get("learning_rate", 2e-4)
     max_seq_length = max_seq_length if max_seq_length is not None else model_cfg.get("max_seq_length", 2048)
-    load_in_4bit = model_cfg.get("load_in_4bit", True)
-
     try:
         from unsloth import FastLanguageModel
         import torch
@@ -119,6 +100,9 @@ def run_tuning(
         print(f"Error: Missing training dependencies: {e}")
         print("Please activate your virtual environment ('source .venv/bin/activate') or install dependencies ('uv sync' / 'pip install -r requirements.txt').")
         sys.exit(1)
+
+    has_cuda = torch.cuda.is_available()
+    load_in_4bit = model_cfg.get("load_in_4bit", True) and has_cuda
 
     print(f"Fine-tuning {model_name}")
     print(f"Dataset: {dataset_path} | Output: {output_dir}")
@@ -151,7 +135,10 @@ def run_tuning(
     dataset = load_local_dataset(dataset_path, eos_token=eos_token, default_organism=target_organism or "Escherichia coli")
     print(f"Loaded {len(dataset)} examples.")
 
-    is_bf16 = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
+    is_bf16 = has_cuda and torch.cuda.is_bf16_supported()
+    fp16 = has_cuda and not is_bf16
+    bf16 = is_bf16
+    optim = train_cfg.get("optim", "adamw_8bit") if has_cuda else "adamw_torch"
 
     trainer = SFTTrainer(
         model=model,
@@ -168,10 +155,10 @@ def run_tuning(
             max_steps=max_steps if max_steps > 0 else -1,
             num_train_epochs=epochs if max_steps <= 0 else 1,
             learning_rate=learning_rate,
-            fp16=not is_bf16,
-            bf16=is_bf16,
+            fp16=fp16,
+            bf16=bf16,
             logging_steps=train_cfg.get("logging_steps", 1),
-            optim=train_cfg.get("optim", "adamw_8bit"),
+            optim=optim,
             weight_decay=train_cfg.get("weight_decay", 0.01),
             lr_scheduler_type=train_cfg.get("lr_scheduler_type", "linear"),
             seed=train_cfg.get("seed", 42),

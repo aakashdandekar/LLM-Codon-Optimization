@@ -129,6 +129,8 @@ def get_bacteria_slug(organism: str) -> Optional[str]:
     return slug or None
 
 def get_short_name(model_name: str) -> str:
+    if not model_name:
+        return "model"
     name = model_name.lower()
     for arch in ("qwen", "gpt2", "llama", "mistral", "codon"):
         if arch in name:
@@ -198,8 +200,26 @@ def validate_candidate(target_protein: str, candidate_dna: str) -> Tuple[bool, s
     except ValueError as e:
         return False, str(e)
 
-def resolve_organism_key(organism: str) -> str:
+def format_prompt(protein: str, organism: Optional[str] = None, dna: Optional[str] = None, eos_token: str = "") -> str:
+    """Format standard biological instruction prompt for tuning and inference."""
+    target_organism = organism or "Escherichia coli"
+    prompt = (
+        "Below is an instruction that describes a biological task, paired with an input that provides further context. "
+        "Write a response that appropriately completes the request.\n\n"
+        "### Instruction:\n"
+        f"Optimize the following protein sequence into a high-expression DNA coding sequence for {target_organism}.\n\n"
+        "### Input:\n"
+        f"{protein}\n\n"
+        "### Response:\n"
+    )
+    if dna:
+        prompt += dna + eos_token
+    return prompt
+
+def resolve_organism_key(organism: Optional[str]) -> str:
     """Map organism string or abbreviation to canonical key ('ecoli', 'yeast', 'human')."""
+    if not organism:
+        return "ecoli"
     org = organism.lower().strip()
     if any(k in org for k in ("yeast", "saccharomyces", "cerevisiae")):
         return "yeast"
@@ -222,16 +242,21 @@ def calculate_cai(dna: str, usage_table: Dict[str, float] | None = None, organis
     else:
         w_table = _ECOLI_W
     
+    valid_codons = 0
     log_sum = 0.0
     count = 0
     num_codons = len(dna) // 3
     for i in range(num_codons):
         codon = dna[i*3:(i+1)*3]
+        if codon in TRANSLATION_TABLE:
+            valid_codons += 1
         if codon in w_table:
             if codon not in ('ATG', 'TGG'):
                 log_sum += math.log(max(w_table[codon], 0.001))
                 count += 1
                 
+    if valid_codons == 0:
+        return 0.0
     if count == 0:
         return 1.0
     return math.exp(log_sum / count)

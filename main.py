@@ -1,23 +1,19 @@
 #!/usr/bin/env python3
 import os
 import sys
-
-_venv_py = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".venv", "bin", "python")
-if os.path.exists(_venv_py) and os.path.abspath(sys.executable) != os.path.abspath(_venv_py):
-    try:
-        import torch  # noqa: F401
-        import unsloth  # noqa: F401
-    except ImportError:
-        os.execv(_venv_py, [_venv_py] + sys.argv)
-
 import json
 import warnings
 import argparse
 from typing import Optional
 
+os.environ.setdefault("TRITON_CACHE_DIR", "/tmp/triton")
 os.environ.setdefault("TORCH_CPP_LOG_LEVEL", "ERROR")
 os.environ.setdefault("TORCH_LOGS", "-all")
 warnings.filterwarnings("ignore")
+
+_venv_py = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".venv", "bin", "python")
+if os.path.exists(_venv_py) and os.path.abspath(sys.executable) != os.path.abspath(_venv_py):
+    os.execv(_venv_py, [_venv_py] + sys.argv)
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:

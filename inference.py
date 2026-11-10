@@ -1,15 +1,6 @@
 #!/usr/bin/env python3
 import os
 import sys
-
-_venv_py = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".venv", "bin", "python")
-if os.path.exists(_venv_py) and os.path.abspath(sys.executable) != os.path.abspath(_venv_py):
-    try:
-        import torch  # noqa: F401
-        import unsloth  # noqa: F401
-    except ImportError:
-        os.execv(_venv_py, [_venv_py] + sys.argv)
-
 import re
 import warnings
 from typing import Optional, Dict, Any
@@ -18,6 +9,10 @@ os.environ.setdefault("TRITON_CACHE_DIR", "/tmp/triton")
 os.environ.setdefault("TORCH_CPP_LOG_LEVEL", "ERROR")
 os.environ.setdefault("TORCH_LOGS", "-all")
 warnings.filterwarnings("ignore")
+
+_venv_py = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".venv", "bin", "python")
+if os.path.exists(_venv_py) and os.path.abspath(sys.executable) != os.path.abspath(_venv_py):
+    os.execv(_venv_py, [_venv_py] + sys.argv)
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:
@@ -30,7 +25,8 @@ from codon_utils import (
     calculate_gc,
     detect_restriction_sites,
     naive_frequency_optimizer,
-    get_output_dir
+    get_output_dir,
+    format_prompt
 )
 
 DEFAULT_BENCHMARK_PROTEIN = (
@@ -39,18 +35,7 @@ DEFAULT_BENCHMARK_PROTEIN = (
     "LSTQSALSKDPNEKRDHMVLLEFVTAAGITHGMDELYK"
 )
 
-
-def format_inference_prompt(protein: str, organism: Optional[str] = None) -> str:
-    target_organism = organism or "Escherichia coli"
-    return (
-        "Below is an instruction that describes a biological task, paired with an input that provides further context. "
-        "Write a response that appropriately completes the request.\n\n"
-        "### Instruction:\n"
-        f"Optimize the following protein sequence into a high-expression DNA coding sequence for {target_organism}.\n\n"
-        "### Input:\n"
-        f"{protein}\n\n"
-        "### Response:\n"
-    )
+format_inference_prompt = format_prompt
 
 
 def extract_dna_from_output(raw_text: str, expected_length_aa: Optional[int] = None) -> str:
@@ -106,12 +91,18 @@ def run_test(
     temperature = temperature if temperature is not None else infer_cfg.get("temperature", 0.2)
     top_p = top_p if top_p is not None else infer_cfg.get("top_p", 0.9)
     max_seq_length = model_cfg.get("max_seq_length", 2048)
-    load_in_4bit = model_cfg.get("load_in_4bit", True)
+    has_cuda = torch.cuda.is_available()
+    load_in_4bit = model_cfg.get("load_in_4bit", True) and has_cuda
     organism = target_organism
 
     is_remote_hf = "/" in model_dir and not os.path.exists(model_dir)
     if not os.path.exists(model_dir) and not is_remote_hf:
         print(f"Model directory not found: {model_dir}")
+        print("Run fine-tuning first: python main.py --tune")
+        return
+
+    if os.path.isdir(model_dir) and not any(os.path.exists(os.path.join(model_dir, f)) for f in ("adapter_config.json", "config.json", "adapter_model.safetensors")):
+        print(f"Model directory '{model_dir}' does not contain trained model weights.")
         print("Run fine-tuning first: python main.py --tune")
         return
 
@@ -145,6 +136,7 @@ def run_test(
     gen_kwargs = {
         "max_new_tokens": resolved_max_new_tokens,
         "use_cache": True,
+        "do_sample": temperature > 0,
         "temperature": temperature,
         "top_p": top_p,
     }
@@ -208,7 +200,7 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Evaluate fine-tuned codon optimizer")
     parser.add_argument("--config", type=str, default="config.yaml", help="Path to config.yaml")
-    parser.add_argument("--model-dir", type=str, default=None)
+    parser.add_argument("--model-dir", "--model", dest="model_dir", type=str, default=None, help="Path or name of model")
     parser.add_argument("--organism", type=str, default=None, help="Target host organism")
     parser.add_argument("--protein", type=str, default=None)
     args = parser.parse_args()
