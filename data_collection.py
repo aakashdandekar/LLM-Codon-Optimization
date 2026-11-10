@@ -219,7 +219,9 @@ def fetch_huggingface_dataset(
         try:
             ds = load_dataset(repo_id, split="train", streaming=True)
             collected = []
+            scanned = 0
             for row in ds:
+                scanned += 1
                 org = row.get("organism") or row.get("species") or "Standard Host"
                 if organism:
                     org_match = (
@@ -232,15 +234,20 @@ def fetch_huggingface_dataset(
                 prot = row.get("protein") or row.get("amino_acid_sequence") or ""
                 dna = row.get("dna") or row.get("coding_sequence") or ""
                 if prot and dna:
-                    collected.append({
+                    ok, _, rec = validate_biological_schema({
                         "organism": str(org).strip(),
                         "protein": str(prot).strip(),
                         "dna": str(dna).strip()
                     })
+                    if ok:
+                        collected.append(rec)
+                        if len(collected) % 50 == 0 or len(collected) == max_samples:
+                            msg = f"  Streaming {repo_id}: {len(collected)}/{max_samples} (scanned {scanned:,})"
+                            print(f"\r{msg[:75]:<75}", end="", flush=True)
                 if len(collected) >= max_samples:
                     break
             if collected:
-                print(f"Loaded {len(collected)} samples from {repo_id}")
+                print(f"\nLoaded {len(collected)} validated samples from {repo_id}")
                 return collected
         except Exception as e:
             print(f"Could not load {repo_id} ({e}), trying next repository...")
@@ -279,27 +286,30 @@ def collect_and_validate(
             organism=organism
         )
 
-    print(f"Validating {len(raw_records)} sequences...")
-    validated = []
-    rejections = {}
-
-    for r in raw_records:
-        ok, reason, rec = validate_biological_schema(r)
-        if ok:
-            validated.append(rec)
-        else:
-            rejections[reason] = rejections.get(reason, 0) + 1
+    if raw_records and "genetic_code_id" in raw_records[0]:
+        validated = raw_records
+    else:
+        print(f"Validating {len(raw_records)} sequences...")
+        validated = []
+        rejections = {}
+        for i, r in enumerate(raw_records, 1):
+            ok, reason, rec = validate_biological_schema(r)
+            if ok:
+                validated.append(rec)
+            else:
+                rejections[reason] = rejections.get(reason, 0) + 1
+            if i % 250 == 0 or i == len(raw_records):
+                print(f"\r  Validating: {i}/{len(raw_records)}", end="", flush=True)
+        print()
+        if rejections:
+            for reason, count in rejections.items():
+                print(f"  Rejected ({reason}): {count}")
 
     with open(target_output, "w", encoding="utf-8") as f:
         for item in validated:
             f.write(json.dumps(item) + "\n")
 
-    print(f"Done: {len(validated)}/{len(raw_records)} sequences passed validation.")
-    if rejections:
-        for reason, count in rejections.items():
-            print(f"  Rejected ({reason}): {count}")
-    print(f"Saved dataset to {target_output}")
-
+    print(f"Done: {len(validated)} sequences saved to {target_output}")
     return target_output
 
 

@@ -29,7 +29,8 @@ from codon_utils import (
     format_prompt
 )
 
-DEFAULT_BENCHMARK_PROTEIN = (
+DEFAULT_BENCHMARK_PROTEIN = load_config().get("inference", {}).get(
+    "benchmark_protein",
     "MSKGEELFTGVVPILVELDGDVNGHKFSVSGEGEGDATYGKLTLKFICTTGKLPVPWPTLVTTFSYGVQCFSRYPDHMKQHDFFKSAMPEGYVQERTIFF"
     "KDDGNYKTRAEVKFEGDTLVNRIELKGIDFKEDGNILGHKLEYNYNSHNVYIMADKQKNGIKVNFKIRHNIEDGSVQLADHYQQNTPIGDGPVLLPDNHY"
     "LSTQSALSKDPNEKRDHMVLLEFVTAAGITHGMDELYK"
@@ -42,27 +43,36 @@ def extract_dna_from_output(raw_text: str, expected_length_aa: Optional[int] = N
     if "### Response:" in raw_text:
         raw_text = raw_text.split("### Response:")[-1].strip()
 
-    # Extract nucleotide characters from the output lines
+    # Extract nucleotide characters from valid sequence lines
     candidate = ""
     for line in raw_text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
         cleaned = re.sub(r"[^ACGTacgt]", "", line).upper()
-        if cleaned:
+        if cleaned and (len(cleaned) / len(stripped)) >= 0.8:
             candidate += cleaned
 
     if not candidate:
         return ""
 
-    # If expected amino acid length is provided, extract exact coding region
+    # Locate first in-frame stop codon
+    first_stop = None
+    for i in range(0, len(candidate) - 2, 3):
+        if candidate[i:i+3] in ("TAA", "TAG", "TGA"):
+            first_stop = i
+            break
+
+    # If expected amino acid length is provided, handle premature stop or extract coding region
     if expected_length_aa is not None:
         expected_nt = expected_length_aa * 3
+        if first_stop is not None and first_stop < expected_nt:
+            return candidate[:first_stop]
         if len(candidate) >= expected_nt:
             return candidate[:expected_nt]
 
-    # Otherwise scan for the first in-frame stop codon
-    for i in range(0, len(candidate) - 2, 3):
-        codon = candidate[i:i+3]
-        if codon in ("TAA", "TAG", "TGA"):
-            return candidate[:i]
+    if first_stop is not None:
+        return candidate[:first_stop]
 
     # Fallback to nearest multiple of 3
     valid_len = (len(candidate) // 3) * 3
@@ -91,11 +101,9 @@ def run_test(
     temperature = temperature if temperature is not None else infer_cfg.get("temperature", 0.2)
     top_p = top_p if top_p is not None else infer_cfg.get("top_p", 0.9)
     max_seq_length = model_cfg.get("max_seq_length", 2048)
-    has_cuda = torch.cuda.is_available()
-    load_in_4bit = model_cfg.get("load_in_4bit", True) and has_cuda
     organism = target_organism
 
-    is_remote_hf = "/" in model_dir and not os.path.exists(model_dir)
+    is_remote_hf = not os.path.exists(model_dir) and "/" in model_dir and not model_dir.startswith(("models/", "./", "../", "/"))
     if not os.path.exists(model_dir) and not is_remote_hf:
         print(f"Model directory not found: {model_dir}")
         print("Run fine-tuning first: python main.py --tune")
@@ -113,6 +121,9 @@ def run_test(
         print(f"Error: Missing inference dependencies: {e}")
         print("Please activate your virtual environment ('source .venv/bin/activate') or install dependencies ('uv sync' / 'pip install -r requirements.txt').")
         sys.exit(1)
+
+    has_cuda = torch.cuda.is_available()
+    load_in_4bit = model_cfg.get("load_in_4bit", True) and has_cuda
 
     print(f"Loading model from {model_dir}...")
     model, tokenizer = FastLanguageModel.from_pretrained(
@@ -159,13 +170,13 @@ def run_test(
     cand_valid, cand_reason = validate_candidate(target_protein, candidate_dna)
     naive_valid, naive_reason = validate_candidate(target_protein, naive_dna)
 
-    cand_cai = calculate_cai(candidate_dna, organism=organism) if cand_valid else 0.0
+    cand_cai = calculate_cai(candidate_dna, organism=organism) if len(candidate_dna) >= 3 else 0.0
     naive_cai = calculate_cai(naive_dna, organism=organism)
 
-    cand_gc = calculate_gc(candidate_dna) if cand_valid else 0.0
+    cand_gc = calculate_gc(candidate_dna)
     naive_gc = calculate_gc(naive_dna)
 
-    cand_sites = detect_restriction_sites(candidate_dna) if cand_valid else []
+    cand_sites = detect_restriction_sites(candidate_dna)
     naive_sites = detect_restriction_sites(naive_dna)
 
     print("\n" + "=" * 65)

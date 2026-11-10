@@ -28,7 +28,8 @@ def detect_dataset_organism(dataset_path: Optional[str], max_check: int = 500) -
     if not dataset_path or not os.path.exists(dataset_path):
         return None
     try:
-        organisms = set()
+        canonical_keys = set()
+        representative = None
         if dataset_path.endswith(".jsonl"):
             with open(dataset_path, "r", encoding="utf-8") as f:
                 for i, line in enumerate(f):
@@ -39,8 +40,10 @@ def detect_dataset_organism(dataset_path: Optional[str], max_check: int = 500) -
                         item = json.loads(line)
                         org = item.get("organism")
                         if org:
-                            organisms.add(org.strip())
-                            if len(organisms) > 1:
+                            canonical_keys.add(resolve_organism_key(org.strip()))
+                            if representative is None:
+                                representative = org.strip()
+                            if len(canonical_keys) > 1:
                                 return None
         elif dataset_path.endswith(".csv"):
             import csv
@@ -50,11 +53,13 @@ def detect_dataset_organism(dataset_path: Optional[str], max_check: int = 500) -
                         break
                     org = row.get("organism")
                     if org:
-                        organisms.add(org.strip())
-                        if len(organisms) > 1:
+                        canonical_keys.add(resolve_organism_key(org.strip()))
+                        if representative is None:
+                            representative = org.strip()
+                        if len(canonical_keys) > 1:
                             return None
-        if len(organisms) == 1:
-            return next(iter(organisms))
+        if len(canonical_keys) == 1:
+            return representative
     except Exception:
         pass
     return None
@@ -74,7 +79,7 @@ def resolve_or_collect_dataset(
         if os.path.exists(dataset_arg):
             if target_organism:
                 detected = detect_dataset_organism(dataset_arg)
-                if detected and detected.lower() != target_organism.lower():
+                if detected and (detected.lower() != target_organism.lower() and resolve_organism_key(detected) != resolve_organism_key(target_organism)):
                     print(f"Warning: Specified dataset '{dataset_arg}' appears to contain data for '{detected}', but target organism is '{target_organism}'.")
             print(f"Using dataset: {dataset_arg}")
             return dataset_arg
@@ -92,6 +97,10 @@ def resolve_or_collect_dataset(
         slug = get_bacteria_slug(target_organism) or target_organism.lower().replace(" ", "_")
         for c in [f"data/dataset_{slug}.jsonl", f"dataset_{slug}.jsonl"]:
             if os.path.exists(c):
+                c_org = detect_dataset_organism(c)
+                if c_org and (c_org.lower() != target_organism.lower() and resolve_organism_key(c_org) != resolve_organism_key(target_organism)):
+                    print(f"Notice: Local file '{c}' contains '{c_org}', not '{target_organism}'. Skipping.")
+                    continue
                 print(f"Found host-matched dataset: {c}")
                 return c
         for c in candidates:
@@ -126,6 +135,14 @@ def main():
     mode_group.add_argument("--tune", action="store_true", help="Fine-tune model on codon dataset")
     mode_group.add_argument("--test", action="store_true", help="Run inference and benchmark against traditional tools")
     mode_group.add_argument("--collect", action="store_true", help="Standalone data collection and validation")
+    mode_group.add_argument(
+        "--merge",
+        nargs="?",
+        const="__DEFAULT__",
+        default=None,
+        metavar="MODEL",
+        help="Merge fine-tuned LoRA adapter into standalone base model (default model if no argument given)"
+    )
 
     opt_group = parser.add_argument_group("Configuration")
     opt_group.add_argument("--config", type=str, default="config.yaml", help="Path to YAML config (default: config.yaml)")
@@ -134,15 +151,17 @@ def main():
     opt_group.add_argument("--dataset", type=str, default=None, help="Path to dataset (.jsonl or .csv)")
     opt_group.add_argument("--protein", type=str, default=None, help="Target protein sequence for inference")
     opt_group.add_argument("--epochs", type=int, default=None, help="Number of training epochs")
+    opt_group.add_argument("--batch-size", type=int, default=None, help="Training batch size per device")
+    opt_group.add_argument("--learning-rate", "--lr", type=float, default=None, help="Training learning rate")
     opt_group.add_argument("--max-steps", type=int, default=None, help="Maximum training steps (-1 for full epoch)")
     opt_group.add_argument("--max-samples", type=int, default=None, help="Maximum samples to collect")
     opt_group.add_argument("--output", type=str, default=None, help="Override output directory")
 
     args = parser.parse_args()
 
-    if not (args.tune or args.test or args.collect):
+    if not (args.tune or args.test or args.collect or args.merge is not None):
         parser.print_help()
-        print("\nPlease specify one of: --tune, --test, or --collect.")
+        print("\nPlease specify one of: --tune, --test, --collect, or --merge.")
         sys.exit(1)
 
     cfg = load_config(args.config)
@@ -179,15 +198,12 @@ def main():
             output_dir=model_out,
             epochs=epochs,
             max_steps=max_steps,
+            batch_size=args.batch_size,
+            learning_rate=args.learning_rate,
             organism=target_organism,
             config=cfg
         )
         print(f"\nFine-tuning complete. Checkpoint saved to: {model_out}")
-        print("To evaluate this model, run:")
-        test_cmd = f"  python main.py --test --model {model_out}"
-        if target_organism:
-            test_cmd += f" --organism \"{target_organism}\""
-        print(f"{test_cmd}\n")
         return
 
     if args.test:
@@ -196,17 +212,51 @@ def main():
         if args.model:
             model_dir = args.output or args.model
         else:
-            if not os.path.exists(candidate_dir) and not target_organism:
-                fallback = get_output_dir(model_name, None)
-                if os.path.exists(fallback):
-                    candidate_dir = fallback
-            model_dir = args.output or (model_cfg.get("output_dir") if args.model is None and not target_organism else None) or candidate_dir
+            default_out = model_cfg.get("output_dir")
+            if default_out and not os.path.exists(default_out):
+                default_out = None
+            if not os.path.exists(candidate_dir):
+                # Search for any existing trained model on disk if candidate_dir doesn't exist
+                if os.path.exists("models"):
+                    for entry in os.listdir("models"):
+                        full_p = os.path.join("models", entry)
+                        if os.path.isdir(full_p) and any(os.path.exists(os.path.join(full_p, f)) for f in ("adapter_config.json", "config.json")):
+                            candidate_dir = full_p
+                            break
+            model_dir = args.output or default_out or candidate_dir
         protein_seq = args.protein or infer_cfg.get("benchmark_protein")
         from inference import run_test
         run_test(
             model_dir=model_dir,
             protein_seq=protein_seq,
             organism=target_organism or infer_cfg.get("default_organism"),
+            config=cfg
+        )
+        return
+
+    if args.merge is not None:
+        target_organism = args.organism or model_cfg.get("organism")
+        if args.merge != "__DEFAULT__":
+            chosen_model = args.merge
+        elif args.model:
+            chosen_model = args.model
+        else:
+            candidate_dir = get_output_dir(model_name, target_organism)
+            default_out = model_cfg.get("output_dir")
+            if default_out and not os.path.exists(default_out):
+                default_out = None
+            if not os.path.exists(candidate_dir) and os.path.exists("models"):
+                for entry in os.listdir("models"):
+                    full_p = os.path.join("models", entry)
+                    if os.path.isdir(full_p) and any(os.path.exists(os.path.join(full_p, f)) for f in ("adapter_config.json", "config.json")):
+                        candidate_dir = full_p
+                        break
+            chosen_model = default_out or candidate_dir
+
+        from tune import run_merge
+        run_merge(
+            model_dir=chosen_model,
+            output_dir=args.output,
             config=cfg
         )
         return

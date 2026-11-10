@@ -19,7 +19,7 @@ if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
 from config import load_config
-from codon_utils import get_output_dir, format_prompt
+from codon_utils import get_output_dir, format_prompt, resolve_organism_key
 
 
 def load_local_dataset(dataset_path: str, eos_token: str = "", default_organism: str = "Escherichia coli"):
@@ -35,10 +35,12 @@ def load_local_dataset(dataset_path: str, eos_token: str = "", default_organism:
                     prot = item.get("protein") or item.get("amino_acid_sequence", "")
                     dna = item.get("dna") or item.get("coding_sequence", "")
                     if prot and dna:
+                        row_org = item.get("organism") or default_organism
+                        prompt_org = default_organism if default_organism and resolve_organism_key(row_org) == resolve_organism_key(default_organism) else row_org
                         entries.append({
                             "text": format_prompt(
                                 prot,
-                                item.get("organism") or default_organism,
+                                prompt_org,
                                 dna,
                                 eos_token=eos_token
                             )
@@ -49,10 +51,11 @@ def load_local_dataset(dataset_path: str, eos_token: str = "", default_organism:
             for row in csv.DictReader(f):
                 prot = row.get("protein") or row.get("amino_acid_sequence", "")
                 dna = row.get("dna") or row.get("coding_sequence", "")
-                org = row.get("organism") or default_organism
+                row_org = row.get("organism") or default_organism
+                prompt_org = default_organism if default_organism and resolve_organism_key(row_org) == resolve_organism_key(default_organism) else row_org
                 if prot and dna:
                     entries.append({
-                        "text": format_prompt(prot, org, dna, eos_token=eos_token)
+                        "text": format_prompt(prot, prompt_org, dna, eos_token=eos_token)
                     })
     else:
         raise ValueError(f"Unsupported dataset format: {dataset_path} (expected .jsonl or .csv)")
@@ -135,15 +138,30 @@ def run_tuning(
     dataset = load_local_dataset(dataset_path, eos_token=eos_token, default_organism=target_organism or "Escherichia coli")
     print(f"Loaded {len(dataset)} examples.")
 
+    eval_dataset = None
+    if len(dataset) >= 20:
+        split = dataset.train_test_split(test_size=min(0.05, 100 / len(dataset)), seed=train_cfg.get("seed", 42))
+        train_dataset = split["train"]
+        eval_dataset = split["test"]
+        print(f"Split: {len(train_dataset)} train, {len(eval_dataset)} validation.")
+    else:
+        train_dataset = dataset
+
     is_bf16 = has_cuda and torch.cuda.is_bf16_supported()
     fp16 = has_cuda and not is_bf16
     bf16 = is_bf16
     optim = train_cfg.get("optim", "adamw_8bit") if has_cuda else "adamw_torch"
 
+    total_steps = (len(train_dataset) // max(1, (batch_size * gradient_accumulation_steps))) * epochs
+    warmup_steps = train_cfg.get("warmup_steps")
+    if warmup_steps is None:
+        warmup_steps = max(5, int(total_steps * 0.03))
+
     trainer = SFTTrainer(
         model=model,
         tokenizer=tokenizer,
-        train_dataset=dataset,
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
         dataset_text_field="text",
         max_seq_length=max_seq_length,
         dataset_num_proc=train_cfg.get("dataset_num_proc", 2),
@@ -151,19 +169,21 @@ def run_tuning(
         args=TrainingArguments(
             per_device_train_batch_size=batch_size,
             gradient_accumulation_steps=gradient_accumulation_steps,
-            warmup_steps=train_cfg.get("warmup_steps", 5),
+            warmup_steps=warmup_steps,
             max_steps=max_steps if max_steps > 0 else -1,
             num_train_epochs=epochs if max_steps <= 0 else 1,
             learning_rate=learning_rate,
             fp16=fp16,
             bf16=bf16,
             logging_steps=train_cfg.get("logging_steps", 1),
+            eval_strategy="epoch" if eval_dataset is not None else "no",
             optim=optim,
             weight_decay=train_cfg.get("weight_decay", 0.01),
             lr_scheduler_type=train_cfg.get("lr_scheduler_type", "linear"),
             seed=train_cfg.get("seed", 42),
             output_dir=output_dir,
-            save_strategy=train_cfg.get("save_strategy", "no"),
+            save_strategy=train_cfg.get("save_strategy", "epoch"),
+            save_total_limit=train_cfg.get("save_total_limit", 2),
         ),
     )
 
@@ -185,6 +205,49 @@ def run_tuning(
     model.save_pretrained(output_dir)
     tokenizer.save_pretrained(output_dir)
     print(f"Model saved to {output_dir}")
+
+
+def run_merge(
+    model_dir: str,
+    output_dir: Optional[str] = None,
+    save_method: str = "merged_16bit",
+    max_seq_length: Optional[int] = None,
+    config: Optional[Dict[str, Any]] = None,
+) -> str:
+    cfg = config or load_config()
+    model_cfg = cfg.get("model", {})
+    resolved_max_seq = max_seq_length or model_cfg.get("max_seq_length", 2048)
+
+    if not os.path.exists(model_dir):
+        raise FileNotFoundError(f"Model directory '{model_dir}' not found on disk.")
+
+    if not any(os.path.exists(os.path.join(model_dir, f)) for f in ("adapter_config.json", "config.json")):
+        raise ValueError(f"Model directory '{model_dir}' does not contain trained model weights.")
+
+    target_out = output_dir or model_dir
+    os.makedirs(os.path.dirname(os.path.abspath(target_out)), exist_ok=True)
+
+    try:
+        from unsloth import FastLanguageModel
+        import torch
+    except ImportError as e:
+        print(f"Error: Missing merge dependencies: {e}")
+        sys.exit(1)
+
+    has_cuda = torch.cuda.is_available()
+    load_in_4bit = model_cfg.get("load_in_4bit", True) and has_cuda
+
+    print(f"Loading adapter model from {model_dir}...")
+    model, tokenizer = FastLanguageModel.from_pretrained(
+        model_name=model_dir,
+        max_seq_length=resolved_max_seq,
+        load_in_4bit=load_in_4bit,
+    )
+
+    print(f"Merging weights and saving standalone model to {target_out} ({save_method})...")
+    model.save_pretrained_merged(target_out, tokenizer, save_method=save_method)
+    print(f"Merge complete! Standalone model saved to: {target_out}")
+    return target_out
 
 
 if __name__ == "__main__":

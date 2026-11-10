@@ -145,7 +145,7 @@ def get_bacteria_slug(organism: str) -> Optional[str]:
     if not is_bacteria(organism):
         return None
     org = organism.lower().strip()
-    if any(k in org for k in ("escherichia", "coli", "ecoli")):
+    if "coli" in org or "ecoli" in org:
         return "ecoli"
     slug = re.sub(r"[^a-z0-9]+", "-", org).strip("-")
     return slug or None
@@ -217,7 +217,10 @@ def validate_candidate(target_protein: str, candidate_dna: str) -> Tuple[bool, s
     try:
         translated = translate_dna(cand_dna, allow_stop=True).rstrip('*')
         if translated != target:
-            return False, f"Translation mismatch: expected {len(target)} aa, got {len(translated)} aa"
+            if len(translated) != len(target):
+                return False, f"Translation length mismatch: expected {len(target)} aa, got {len(translated)} aa"
+            mismatches = sum(1 for a, b in zip(target, translated) if a != b)
+            return False, f"Translation sequence mismatch: {mismatches}/{len(target)} aa differ"
         return True, "PASSED"
     except ValueError as e:
         return False, str(e)
@@ -243,11 +246,13 @@ def resolve_organism_key(organism: Optional[str]) -> str:
     if not organism:
         return "ecoli"
     org = organism.lower().strip()
+    if "coli" in org or "ecoli" in org:
+        return "ecoli"
     if any(k in org for k in ("yeast", "saccharomyces", "cerevisiae")):
         return "yeast"
     if any(k in org for k in ("human", "homo", "sapiens")):
         return "human"
-    return "ecoli"
+    return org
 
 _CACHED_ENZYMES = None
 
@@ -308,7 +313,7 @@ def detect_restriction_sites(dna: str, enzymes: Dict[str, str] | None = None) ->
         rev_s = reverse_complement(s)
         if s in dna:
             found.append(f"{name} ({s})")
-        elif rev_s != s and rev_s in dna:
+        if rev_s != s and rev_s in dna:
             found.append(f"{name} ({s} rev)")
     return found
 
