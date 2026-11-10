@@ -91,9 +91,16 @@ def _build_relative_adaptiveness(usage_table: Dict[str, float]) -> Dict[str, flo
             w[c] = usage_table.get(c, 0.001) / max(max_freq, 0.001)
     return w
 
+def _build_log_w(w_table: Dict[str, float]) -> Dict[str, float]:
+    return {c: math.log(max(val, 0.001)) for c, val in w_table.items()}
+
 _ECOLI_W = _build_relative_adaptiveness(ECOLI_CODON_USAGE)
 _YEAST_W = _build_relative_adaptiveness(YEAST_CODON_USAGE)
 _HUMAN_W = _build_relative_adaptiveness(HUMAN_CODON_USAGE)
+
+_ECOLI_LOG_W = _build_log_w(_ECOLI_W)
+_YEAST_LOG_W = _build_log_w(_YEAST_W)
+_HUMAN_LOG_W = _build_log_w(_HUMAN_W)
 
 ORGANISM_TABLES = {
     'ecoli': _ECOLI_W,
@@ -102,6 +109,15 @@ ORGANISM_TABLES = {
     'saccharomyces': _YEAST_W,
     'human': _HUMAN_W,
     'homo': _HUMAN_W,
+}
+
+ORGANISM_LOG_TABLES = {
+    'ecoli': _ECOLI_LOG_W,
+    'escherichia': _ECOLI_LOG_W,
+    'yeast': _YEAST_LOG_W,
+    'saccharomyces': _YEAST_LOG_W,
+    'human': _HUMAN_LOG_W,
+    'homo': _HUMAN_LOG_W,
 }
 
 BACTERIA_KEYWORDS = (
@@ -227,6 +243,12 @@ def resolve_organism_key(organism: Optional[str]) -> str:
         return "human"
     return "ecoli"
 
+_COMPLEMENT = str.maketrans("ATGCatgc", "TACGtacg")
+
+def reverse_complement(dna: str) -> str:
+    """Return the reverse complement of a nucleotide sequence."""
+    return dna.translate(_COMPLEMENT)[::-1]
+
 _CACHED_ENZYMES = None
 
 def calculate_cai(dna: str, usage_table: Dict[str, float] | None = None, organism: str | None = None) -> float:
@@ -235,12 +257,12 @@ def calculate_cai(dna: str, usage_table: Dict[str, float] | None = None, organis
         return 0.0
     
     if usage_table is not None:
-        w_table = _build_relative_adaptiveness(usage_table)
+        log_w = _build_log_w(_build_relative_adaptiveness(usage_table))
     elif organism:
         org_key = resolve_organism_key(organism)
-        w_table = ORGANISM_TABLES.get(org_key, _ECOLI_W)
+        log_w = ORGANISM_LOG_TABLES.get(org_key, _ECOLI_LOG_W)
     else:
-        w_table = _ECOLI_W
+        log_w = _ECOLI_LOG_W
     
     valid_codons = 0
     log_sum = 0.0
@@ -250,9 +272,9 @@ def calculate_cai(dna: str, usage_table: Dict[str, float] | None = None, organis
         codon = dna[i*3:(i+1)*3]
         if codon in TRANSLATION_TABLE:
             valid_codons += 1
-        if codon in w_table:
+        if codon in log_w:
             if codon not in ('ATG', 'TGG'):
-                log_sum += math.log(max(w_table[codon], 0.001))
+                log_sum += log_w[codon]
                 count += 1
                 
     if valid_codons == 0:
@@ -279,7 +301,16 @@ def detect_restriction_sites(dna: str, enzymes: Dict[str, str] | None = None) ->
             except Exception:
                 _CACHED_ENZYMES = DEFAULT_RESTRICTION_SITES
         enzymes = _CACHED_ENZYMES
-    return [f"{name} ({site})" for name, site in enzymes.items() if site in dna]
+
+    found = []
+    for name, site in enzymes.items():
+        site_upper = site.upper()
+        rev_site = reverse_complement(site_upper)
+        if site_upper in dna:
+            found.append(f"{name} ({site_upper})")
+        elif rev_site != site_upper and rev_site in dna:
+            found.append(f"{name} ({site_upper} rev)")
+    return found
 
 def naive_frequency_optimizer(
     protein: str,

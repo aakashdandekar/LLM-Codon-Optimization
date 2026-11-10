@@ -88,16 +88,17 @@ def resolve_or_collect_dataset(
     ])
 
     if target_organism:
-        from codon_utils import get_bacteria_slug
+        from codon_utils import get_bacteria_slug, resolve_organism_key
         slug = get_bacteria_slug(target_organism) or target_organism.lower().replace(" ", "_")
         for c in [f"data/dataset_{slug}.jsonl", f"dataset_{slug}.jsonl"]:
             if os.path.exists(c):
                 print(f"Found host-matched dataset: {c}")
                 return c
+        target_key = resolve_organism_key(target_organism)
         for c in candidates:
             if os.path.exists(c):
                 c_org = detect_dataset_organism(c)
-                if c_org is None or c_org.lower() == target_organism.lower():
+                if c_org and (c_org.lower() == target_organism.lower() or resolve_organism_key(c_org) == target_key):
                     print(f"Found compatible local dataset: {c}")
                     return c
         print(f"No local dataset found for {target_organism}. Collecting/generating...")

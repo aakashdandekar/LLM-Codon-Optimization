@@ -45,7 +45,7 @@ def infer_taxonomy(organism: str) -> str:
     if is_bacteria(organism):
         return "bacteria"
     org = organism.lower()
-    if any(k in org for k in ["saccharomyces", "homo", "sapiens", "cricetulus", "mus", "arabidopsis", "drosophila", "yeast"]):
+    if any(k in org for k in ["saccharomyces", "homo", "sapiens", "human", "cricetulus", "mus", "arabidopsis", "drosophila", "yeast"]):
         return "eukaryota"
     elif any(k in org for k in ["methano", "archaea", "sulfolobus"]):
         return "archaea"
@@ -186,6 +186,15 @@ def generate_synthetic_control(
     return records
 
 
+def is_huggingface_reachable() -> bool:
+    import socket
+    try:
+        with socket.create_connection(("huggingface.co", 443), timeout=1.0):
+            return True
+    except OSError:
+        return False
+
+
 def fetch_huggingface_dataset(
     max_samples: int = 10000,
     dataset_repos: Optional[List[str]] = None,
@@ -193,6 +202,10 @@ def fetch_huggingface_dataset(
 ) -> List[Dict[str, str]]:
     repos = dataset_repos if dataset_repos is not None else PREDEFINED_DATASETS
     if not repos:
+        return []
+
+    if not is_huggingface_reachable():
+        print("Notice: Hugging Face is unreachable (offline or sandboxed); skipping remote fetch.")
         return []
 
     try:
