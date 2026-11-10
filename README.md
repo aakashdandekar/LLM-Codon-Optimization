@@ -3,7 +3,7 @@
 [![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-3776AB?logo=python&logoColor=white)](https://python.org)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.x-EE4C2C?logo=pytorch&logoColor=white)](https://pytorch.org)
 [![Unsloth](https://img.shields.io/badge/Unsloth-Fast%20LoRA-brightgreen)](https://github.com/unslothai/unsloth)
-[![Model on HuggingFace](https://img.shields.io/badge/HuggingFace-CodonLLM--1.5B-FFD21E?logo=huggingface&logoColor=black)](https://huggingface.co/aakashdandekar2006/CodonLLM-1.5B)
+[![Model on HuggingFace](https://img.shields.io/badge/HuggingFace-Qwen--Coli--1.5B-FFD21E?logo=huggingface&logoColor=black)](https://huggingface.co/aakashdandekar2006/Qwen-Coli-1.5B)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
 > Fine-tuning autoregressive Large Language Models to translate proteins into biologically harmonized DNA coding sequences—learning contextual biology where classical algorithms fail.
@@ -129,13 +129,13 @@ Execute the comparative benchmark using either your locally trained checkpoint o
 
 ```bash
 # Run benchmark using pre-trained weights from Hugging Face
-python main.py --test --model aakashdandekar2006/CodonLLM-1.5B
+python main.py --test --model aakashdandekar2006/Qwen-Coli-1.5B
 
 # Run benchmark on local checkpoint
 python main.py --test
 
 # Optimize a specific custom protein sequence
-python main.py --test --model aakashdandekar2006/CodonLLM-1.5B --protein "MAENQKKIQNALEKLKASRLEKATLLEEKLRQSQEELQRQRKQEERKRQEEKL"
+python main.py --test --model aakashdandekar2006/Qwen-Coli-1.5B --protein "MAENQKKIQNALEKLKASRLEKATLLEEKLRQSQEELQRQRKQEERKRQEEKL"
 ```
 
 ---
@@ -166,7 +166,7 @@ $$\text{CAI} = \exp\left( \frac{1}{L} \sum_{k=1}^{L} \ln(w_k) \right)$$
 ## Model Availability
 
 The fine-tuned model checkpoint and LoRA adapter weights are published on the Hugging Face Hub:
-* **Model Repository:** [aakashdandekar2006/CodonLLM-1.5B](https://huggingface.co/aakashdandekar2006/CodonLLM-1.5B)
+* **Model Repository:** [aakashdandekar2006/Qwen-Coli-1.5B](https://huggingface.co/aakashdandekar2006/Qwen-Coli-1.5B)
 * **Base Architecture:** `unsloth/Qwen2.5-Coder-1.5B-Instruct-bnb-4bit`
 
 ---
